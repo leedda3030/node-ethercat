@@ -165,7 +165,7 @@ void start(const FunctionCallbackInfo<Value>& args) {
 void addSlave(const FunctionCallbackInfo<Value>&args){
     Isolate *isolate=Isolate::GetCurrent();
     HandleScope scope(isolate);
-    
+
 }
 
 
@@ -175,9 +175,8 @@ void init(Handle<Object> exports) {
   NODE_SET_METHOD(exports,"addSlave",addSlave);
   NODE_SET_METHOD(exports, "start", start);
 
-
 }
 
-NODE_MODULE(ethercatNative, init)
+NODE_MODULE(ethercat, init)
 
 /****************************************************************************/
