@@ -1,0 +1,27 @@
+{
+  "name": "node-ethercat",
+  "version": "1.0.0",
+  "description": "Node ethercat native bindings for IgH ethercat master",
+  "main": "test.js",
+  "scripts": {
+    "test": "node test",
+    "install": "node-gyp rebuild"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sledesm/node-ethercat.git"
+  },
+  "keywords": [
+    "node",
+    "ethercat",
+    "IgH",
+    "master"
+  ],
+  "author": "Santiago Ledesma",
+  "license": "GPL-2.0",
+  "gypfile": true,
+  "bugs": {
+    "url": "https://github.com/sledesm/node-ethercat/issues"
+  },
+  "homepage": "https://github.com/sledesm/node-ethercat#readme"
+}
