@@ -2,7 +2,7 @@
   "name": "node-ethercat",
   "version": "1.0.1",
   "description": "Node ethercat native bindings for IgH ethercat master",
-  "main": "test.js",
+  "main": "node-ethercat.js",
   "scripts": {
     "test": "node test",
     "install": "node-gyp rebuild"
