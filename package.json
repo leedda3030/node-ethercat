@@ -1,6 +1,6 @@
 {
   "name": "node-ethercat",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Node ethercat native bindings for IgH ethercat master",
   "main": "node-ethercat.js",
   "scripts": {
