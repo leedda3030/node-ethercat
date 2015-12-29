@@ -20,6 +20,7 @@ Please take into account that some structures (like pin names and offsets) are k
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <sched.h>
@@ -73,6 +74,8 @@ static uint8_t *domain_pd=NULL; // process data
 
 vector <SSlave> slaves;
 static bool initialised=false;
+static bool active = false;
+
 
 /****************************************************************************/
 
@@ -494,13 +497,130 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
 }
 
 
+pthread_t cycleId;
+
+#define MY_PRIORITY (49) /* we use 49 as the PRREMPT_RT use 50
+ as the priority of kernel tasklets
+ and interrupt handler by default */
+
+#define MAX_SAFE_STACK (8*1024) /* The maximum stack size which is
+ guaranteed safe to access without
+ faulting */
+
+#define NSEC_PER_SEC    (1000000000) /* The number of nsecs per sec. */
+
+#define EC_NEWTIMEVAL2NANO(TV) \
+(((TV).tv_sec - 946684800ULL) * 1000000000ULL + (TV).tv_nsec)
+
+unsigned int _times=0;
+
+void stack_prefault(void) {
+
+    unsigned char dummy[MAX_SAFE_STACK];
+
+    memset(dummy, 0, MAX_SAFE_STACK);
+    return;
+}
+
+unsigned long maxDif=0;
+double accumDif=0;
+double avgDif=0;
+unsigned long curTime=0;
+unsigned long curSecs=0;
+
+void * cycle(void *arg){
+    struct sched_param param;
+    /* Declare ourself as a real time task */
+    pid_t tid;
+    tid = syscall(SYS_gettid);
+    printf("tid: %d\n",tid);
+    param.sched_priority = MY_PRIORITY;
+    if(sched_setscheduler(tid, SCHED_FIFO, &param) == -1) {
+        perror("sched_setscheduler failed");
+        return NULL;
+        //exit(-1);
+    }
+
+    /* Lock memory */
+
+    if(mlockall(MCL_CURRENT|MCL_FUTURE) == -1) {
+        perror("mlockall failed");
+        return NULL;
+        //exit(-2);
+    }
+
+    /* Pre-fault our stack */
+
+    stack_prefault();
+
+    timespec cur_time;
+    clock_gettime(CLOCK_REALTIME, &cur_time);
+
+    timespec wait_time = {
+        0,
+        0
+    };
+
+    cpu_set_t my_set;
+    CPU_ZERO(&my_set);
+    CPU_SET(0, &my_set);
+    sched_setaffinity(tid, sizeof(cpu_set_t), &my_set);
+
+    clock_gettime(CLOCK_REALTIME, &cur_time);
+    wait_time.tv_nsec=1000000000-wait_time.tv_nsec; // Nos sincronizamos al siguiente segundo
+    //wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec+1) % LOOP_PERIOD_NS);
+    nanosleep(&wait_time,NULL);
+    wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec) % LOOP_PERIOD_NS);
+    nanosleep(&wait_time,NULL);
+    printf("Entering loop\n");
+    while (1) {
+        _times++;
+
+        ecrt_master_send(master);
+        ecrt_master_receive(master);
+
+
+        ecrt_domain_process(domain);
+        ecrt_domain_queue(domain);
+        clock_gettime(CLOCK_REALTIME, &cur_time);
+        wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec) % LOOP_PERIOD_NS);
+        nanosleep(&wait_time, NULL);
+        clock_gettime(CLOCK_REALTIME, &cur_time);
+    }
+}
+
+//Activates the master
+void activate(const FunctionCallbackInfo<Value>&args){
+    Isolate *isolate=Isolate::GetCurrent();
+    HandleScope scope(isolate);
+    printf("Calling activate\n");
+    if (active){
+        setError(args,(char *)"Ehtercat already active");
+        return;
+    }
+    pthread_create(&cycleId,NULL,&cycle,NULL);
+    if (ecrt_master_activate(master)){
+        setError(args,(char *)"Could not activate master");
+        return;
+    }
+    if (!(domain_pd = ecrt_domain_data(domain))) {
+        setError(args,(char*)"Could not retrieve domain data");
+        return;
+    }
+    printf("Master active\n");
+    Local<Object> res=Object::New(isolate);
+    res->Set(String::NewFromUtf8(isolate,"result"),String::NewFromUtf8(isolate,"ok"));
+    res->Set(String::NewFromUtf8(isolate,"data"),Object::New(isolate));
+    args.GetReturnValue().Set(res);
+}
 
 
 void init(Handle<Object> exports) {
 
   NODE_SET_METHOD(exports,"addSlave",addSlave);
   NODE_SET_METHOD(exports,"printSlave",printSlave);
-  NODE_SET_METHOD(exports, "start", start);
+  NODE_SET_METHOD(exports,"start", start);
+  NODE_SET_METHOD(exports,"activate",activate);
 
 }
 

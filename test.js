@@ -71,6 +71,8 @@ function addSlaves(index,callback){
 addSlaves(0,function(res){
     var pins=ethercat.getPins();
     ethercat.start({},function(res){
-        console.log(res);
+        ethercat.activate({},function(res){
+            console.log(res);
+        })
     });
 })

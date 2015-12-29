@@ -77,6 +77,11 @@ function start(options,callback){
     callback(result);
 }
 
+function activate(options,callback){
+    var res=ethercat.activate();
+    callback(res);
+}
+
 function addPin(options){
     var name=options.name;
     var size=options.size;
@@ -253,6 +258,7 @@ function getPins(){
 
 module.exports={
     start:start,
+    activate:activate,
     addSlave:addSlave,
     printSlave:printSlave,
     getPins:getPins
