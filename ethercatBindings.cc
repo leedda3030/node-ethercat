@@ -54,13 +54,6 @@ class SSlave{
 };
 
 vector <SSlave> slaves;
-//static bool initialised=false;
-
-/*static ec_slave_config_t *sc_ana_in = NULL;
-static ec_slave_config_state_t sc_ana_in_state = {};
-
-static ec_slave_config_t *sc_rta_x = NULL;
-static ec_slave_config_state_t sc_rta_x_state = {};*/
 
 /****************************************************************************/
 
@@ -223,12 +216,6 @@ void printSlave(const FunctionCallbackInfo<Value>&args){
 void addSlave(const FunctionCallbackInfo<Value>&args){
     Isolate *isolate=Isolate::GetCurrent();
     HandleScope scope(isolate);
-    /*
-        Local<Object>options=args[0]->ToObject();
-        offLoopPeriod=options->Get(String::NewFromUtf8(isolate,"offLoopPeriod"))->NumberValue();
-        printf("ethercatRT. LoopPeriodOffset: %d ",offLoopPeriod);
-
-    */
     if (!master){
         master=ecrt_request_master(0);
         if (!master){
@@ -326,7 +313,6 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
                watchdog=EC_WD_ENABLE;
                break;
         }
-        printf("Configuring slave with syncManager: %d, direction_enum:%d,watchdog_enum:%d\n",syncManager,direction_enum,watchdog_enum);
         Local<Value>pdos=sync->ToObject()->Get(String::NewFromUtf8(isolate,"pdos"));
         if (!pdos->IsArray()){
             setError(args,(char *)"invalid object syntax. Please include pdos member");
@@ -357,12 +343,10 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
             unsigned int uPdoIndex=vPdoIndex->NumberValue();
             Local<Value>entries=oPdo->ToObject()->Get(String::NewFromUtf8(isolate,"entries"));
             int numEntries=Local<Array>::Cast(entries)->Length();
-            printf("Configuring pdo with index: 0x%X and %d entries\n",uPdoIndex,numEntries);
             ec_pdo_entry_info_t *pdoEntryArray=(ec_pdo_entry_info_t *)malloc(numEntries*sizeof(ec_pdo_entry_info_t));
             pdoArray[p].index=uPdoIndex;
             pdoArray[p].n_entries=numEntries;
             pdoArray[p].entries=pdoEntryArray;
-            printf("adding pdo %d with index 0x%X, numEntries: %d\n",p,uPdoIndex,numEntries);
             for (int i=0; i<numEntries; i++){
                 Local<Value>oEntry=Local<Array>::Cast(entries)->Get(i)->ToObject();
                 Local<Value>vEntryIndex=oEntry->ToObject()->Get(String::NewFromUtf8(isolate,"index"));
@@ -388,7 +372,6 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
                 pdoEntryArray[i].index=uEntryIndex;
                 pdoEntryArray[i].subindex=uSubIndex;
                 pdoEntryArray[i].bit_length=uBitLength;
-                printf("pdo %d, index: 0x%X, subIndex: 0x%X, bitLength:%d\n",i,uEntryIndex,uSubIndex,uBitLength);
             }
         }
     }
@@ -408,96 +391,13 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
     data->Set(String::NewFromUtf8(isolate,"index"),Number::New(isolate,slaveIndex));
     res->Set(String::NewFromUtf8(isolate,"data"),data);
     args.GetReturnValue().Set(res);
-//    ecrt_slave_config_pdos(slave.slave_config,)
 
-/*
-
-ethercat.addSlave({
-        position:[0,i], // donde están en el bus
-        ids:[0x0000017f,0x00000014], // cuál es el id del dispositivo
-        config:{
-                   pdos:[
-                        {index:0x6040,value:0x0,size:16,pinName:"offControlWord0"},
-                        {index:0x607a,value:0x0,size:32,pinName:"targetPosition0"},
-                        {index:0x6041,value:0x0,size:16,pinName:"statusWord0"},
-                        {index:0x6064,value:0x0,size:32,pinName:"actualPosition0"}
-                   ],
-                   rxPdo:{
-                       index:0x1601,
-                       records:[0,1]
-                   },
-                   txPdo:{
-                      index:0x1A01,
-                      records:[2,3]
-                   },
-                   syncs:[
-                     {index:2,
-                      dir:"output",
-                      value:1,
-                      records:[0,1],
-                      wd:"EC_WD_DISABLE"
-                     },
-                     {index:2,
-                      dir:"input",
-                      value:1,
-                      records:[2,3],
-                      wd:"EC_WD_DISABLE"
-                   ]
-               }
-   });
-
-Isolate* isolate = Isolate::GetCurrent();
-     HandleScope scope(isolate);
-     Local<Object> obj = Object::New(isolate);
-     obj->Set(String::NewFromUtf8(isolate,"times"),Number::New(isolate,_times));
-     obj->Set(String::NewFromUtf8(isolate,"maxDif"),Number::New(isolate,maxDif));
-     obj->Set(String::NewFromUtf8(isolate,"avgDif"),Number::New(isolate,avgDif));
-     obj->Set(String::NewFromUtf8(isolate,"accumDif"),Number::New(isolate,accumDif));
-     obj->Set(String::NewFromUtf8(isolate,"curTime"),Number::New(isolate,(double)curTime/1000000));
-     obj->Set(String::NewFromUtf8(isolate,"curSecs"),Number::New(isolate,curSecs));
-     args.GetReturnValue().Set(obj);
-
-
-{"pdos":[{"index":"0x6040","value":0,"size":16,"pinName":"offControlWord0"},{"index":"0x607a","value":0,"size":32,"pinName":"targetPosition0"},{"index":"0x6041","value":0,"size":16,"pinName":"statusWord0"},{"index":"0x6064","value":0,"size":32,"pinName":"actualPosition0"}],"rxPdo":{"index":5633,"records":[0,1]},"txPdo":{"index":6657,"records":[2,3]},"syncs":[{"index":2,"dir":"output","value":1,"records":[0,1],"wd":"EC_WD_DISABLE"},{"index":2,"dir":"input","value":1,"records":[2,3],"wd":"EC_WD_DISABLE"}]}
-slaveConfig:{
-    pdos:[
-         {index:0x6040,value:0x0,size:16,pinName:"offControlWord0"},
-         {index:0x607a,value:0x0,size:32,pinName:"targetPosition0"},
-         {index:0x6041,value:0x0,size:16,pinName:"statusWord0"},
-         {index:0x6064,value:0x0,size:32,pinName:"actualPosition0"}
-    ],
-    rxPdo:{
-        index:0x1601,
-        records:[0,1]
-    },
-    txPdo:{
-       index:0x1A01,
-       records:[2,3]
-    },
-    syncs:[
-      {index:2,
-       dir:"output",
-       value:1,
-       records:[0,1],
-       wd:"EC_WD_DISABLE"
-      },
-      {index:2,
-       dir:"input",
-       value:1,
-       records:[2,3],
-       wd:"EC_WD_DISABLE"
-    ]
-}
-
-
-*/
 
 
 }
 
 
 void init(Handle<Object> exports) {
-                         /* the defined mask, i.e. only 7. */
 
   NODE_SET_METHOD(exports,"addSlave",addSlave);
   NODE_SET_METHOD(exports,"printSlave",printSlave);
