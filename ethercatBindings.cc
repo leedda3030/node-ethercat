@@ -1,4 +1,14 @@
 /*
+Author: Santiago Ledesma (sledesm@gmail.com)
+
+Note: The functions here are intended to be called from node-ethercat.js
+
+It is unsafe to call them without parameter checking as the C code will assume that all prechecks about data validity
+will be performed by the caller.
+
+
+Please take into account that some structures (like pin names and offsets) are kept by the javascript part.
+
 */
 
 #include <errno.h>
@@ -48,17 +58,24 @@ static ec_domain_state_t domain_state ;
 
 class SSlave{
  public:
+
+    int positionAlias;
+    int positionIndex;
+    int vendorId;
+    int productId;
     ec_slave_config_t *slave_config;
     ec_sync_info_t *syncs;
     int numSyncs; // numero de syncs
 };
 
+static ec_pdo_entry_reg_t * domain_regs=NULL; // domain regs
+static uint8_t *domain_pd=NULL; // process data
+
 vector <SSlave> slaves;
+static bool initialised=false;
 
 /****************************************************************************/
 
-// process data
-static uint8_t *domain_pd = NULL;
 
 
 void check_domain_state(void)
@@ -156,19 +173,6 @@ int _start()
 }
 
 
-void start(const FunctionCallbackInfo<Value>& args) {
-
-    // Vamos a recuperar los parámetros
-    Isolate *isolate=Isolate::GetCurrent();
-    HandleScope scope(isolate);
-    _start();
-
-
-}
-
-
-
-
 void setError(const FunctionCallbackInfo<Value>&args,char *msg){
     Isolate *isolate=Isolate::GetCurrent();
     Local<Object> res=Object::New(isolate);
@@ -176,6 +180,107 @@ void setError(const FunctionCallbackInfo<Value>&args,char *msg){
     res->Set(String::NewFromUtf8(isolate,"error"),String::NewFromUtf8(isolate,msg));
     args.GetReturnValue().Set(res);
 }
+
+
+void start(const FunctionCallbackInfo<Value>& args) {
+    Isolate *isolate=Isolate::GetCurrent();
+    HandleScope scope(isolate);
+
+    Local<Object> options=args[0]->ToObject();
+    if (initialised){
+        setError(args,(char*)"Cannot start system. Already started");
+        return;
+    }
+    Local<Array>domainEntries=Local<Array>::Cast(options->Get(String::NewFromUtf8(isolate,"domainEntries")));
+    int numEntries=domainEntries->Length();
+
+    if (!master){
+        master=ecrt_request_master(0);
+        if (!master){
+            setError(args,(char*)"Cannot retrieve master. Is ethercat running and are you root?");
+            return;
+        }
+    }
+    if (!domain){
+        domain=ecrt_master_create_domain(master);
+        if (!domain){
+            setError(args,(char*)"Cannot create domain.");
+            return;
+        }
+    }
+
+    initialised=true;
+
+
+    int numSlaves=slaves.size();
+    printf("We have a total of %d slaves\n",numSlaves);
+    for (int s=0; s<numSlaves; s++){
+        SSlave slave=slaves[s];
+        int positionAlias=slave.positionAlias;
+        int positionIndex=slave.positionIndex;
+        int vendorId=slave.vendorId;
+        int productId=slave.productId;
+        slave.slave_config=ecrt_master_slave_config(master,positionAlias,positionIndex,vendorId,productId);
+        if (!slave.slave_config){
+            setError(args,(char *)"Cannot get slave_config");
+            return;
+        }
+        printf("Configuring pdos for slave %d, numSyncs: %d\n",s,slave.numSyncs);
+        if (ecrt_slave_config_pdos(slave.slave_config,slave.numSyncs,slave.syncs)){
+            setError(args,(char *)"Cannot configure slave pdos for slave");
+            return;
+        }
+    }
+
+    // Let's create the process domain array
+    domain_regs=(ec_pdo_entry_reg_t *)malloc(numEntries*sizeof(ec_pdo_entry_reg_t));
+    unsigned int *offsets=(unsigned int *)malloc(numEntries*sizeof(unsigned int));
+    for (int i=0; i<numEntries; i++){
+        Local<Object>entry=domainEntries->Get(i)->ToObject();
+        ec_pdo_entry_reg_t domainReg;
+        domainReg.alias=entry->Get(String::NewFromUtf8(isolate,"alias"))->NumberValue();
+        domainReg.position=entry->Get(String::NewFromUtf8(isolate,"position"))->NumberValue();
+        domainReg.vendor_id=entry->Get(String::NewFromUtf8(isolate,"vendor_id"))->NumberValue();
+        domainReg.product_code=entry->Get(String::NewFromUtf8(isolate,"product_code"))->NumberValue();
+        domainReg.index=entry->Get(String::NewFromUtf8(isolate,"index"))->NumberValue();
+        domainReg.subindex=entry->Get(String::NewFromUtf8(isolate,"subindex"))->NumberValue();
+        offsets[i]=-1;
+        domainReg.offset=&(offsets[i]);
+        domain_regs[i]=domainReg;
+    }
+    if (ecrt_domain_reg_pdo_entry_list(domain,domain_regs)){
+        setError(args,(char *)"Cannot register domain");
+        return;
+    }
+    for(int i=0; i<numEntries; i++){
+        Local<Object>entry=domainEntries->Get(i)->ToObject();
+        entry->Set(String::NewFromUtf8(isolate,"offset"),Number::New(isolate,offsets[i]));
+        printf("Entry %d, offset %d\n",i,offsets[i]);
+    }
+
+        Local<Object> res=Object::New(isolate);
+        res->Set(String::NewFromUtf8(isolate,"result"),String::NewFromUtf8(isolate,"ok"));
+        res->Set(String::NewFromUtf8(isolate,"data"),Object::New(isolate));
+        args.GetReturnValue().Set(res);
+
+/*    if (!ecrt_master_activate(master)){
+        setError(args,(char *)"Cannot activate master");
+        return;
+    }
+    domain_pd=ecrt_domain_data(domain);
+    if (!domain_pd){
+        setError(args,(char*)"Did not get domain data");
+        return;
+    }*/
+
+//    _start();
+
+
+}
+
+
+
+
 
 void printSlave(const FunctionCallbackInfo<Value>&args){
     Local<Value> vIndex=args[0];
@@ -213,23 +318,11 @@ void printSlave(const FunctionCallbackInfo<Value>&args){
 }
 
 
+// Adds a slave config to the slave list. This does not configure the slave yet. That will be done during the
+// run phase.
 void addSlave(const FunctionCallbackInfo<Value>&args){
     Isolate *isolate=Isolate::GetCurrent();
     HandleScope scope(isolate);
-    if (!master){
-        master=ecrt_request_master(0);
-        if (!master){
-            setError(args,(char*)"Cannot retrieve master. Is ethercat running and are you root?");
-            return;
-        }
-    }
-    if (!domain){
-        domain=ecrt_master_create_domain(master);
-        if (!domain){
-            setError(args,(char*)"Cannot create domain.");
-            return;
-        }
-    }
 
     Local<Value> options=args[0];
     if (!options->IsObject()){
@@ -354,7 +447,7 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
                     setError(args,(char *)"index property in pdo must be a number");
                     return;
                 }
-                Local<Value>vSubIndex=oEntry->ToObject()->Get(String::NewFromUtf8(isolate,"subIndex"));
+                Local<Value>vSubIndex=oEntry->ToObject()->Get(String::NewFromUtf8(isolate,"subindex"));
                 if (!vSubIndex->IsNumber()){
                     setError(args,(char *)"subIndex property in pdo must be a number");
                     return;
@@ -378,9 +471,13 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
 
 
     SSlave slave;
-    slave.slave_config=ecrt_master_slave_config(master,positionAlias,positionIndex,vendorId,productId);
+    slave.slave_config=NULL;
     slave.syncs=syncArray;
     slave.numSyncs=numSyncs;
+    slave.positionAlias=positionAlias;
+    slave.positionIndex=positionIndex;
+    slave.vendorId=vendorId;
+    slave.productId=productId;
 
     int slaveIndex=slaves.size();
     slaves.push_back(slave);
@@ -395,6 +492,8 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
 
 
 }
+
+
 
 
 void init(Handle<Object> exports) {

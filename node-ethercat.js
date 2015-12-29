@@ -1,26 +1,133 @@
+/*
+    Author: Santiago Ledesma.
+
+ This module aims to provide nodejs bindings to the ethercat controller IgH Ethercat Master, adding some syntax
+ sugar.
+
+ Features:
+
+ a) Simple JSON structure to define slaves. It defines syncs, pdos, and also names for domain register configuration.
+ b) Internally it creates a shared memory region to be mapped with other software - eg. CNC software
+ c) Uses realtime preempt RT thread internally to read/write from shared memory and communicate with ethercat
+ d) Intented to be embedded in a bigger node application. See ethercatServer at github for example
+ e) Only critical parts are in C. Provides an abstraction layer in javascript
+ f) All values to be sent/retrieved are published in a dictionary called pins. Each pin has a name, a size, a type and
+    and offset in the process memory map. Pin offset is assigned once the process has started.
+
+
+ */
+
 var ethercat=require('./build/Release/ethercat');
 
-var slaves={};
+var slaves={}; // associative array of slaves by id
+var slaveList=[]; // list of slaves
 
-function start(){
-    return ethercat.start();
+var pins={}; // associative array of pins by id
+var pinList=[]; // List of pins
+var numPins=0; // How many pins have been added? We have one ec_pdo_entry_reg_t per pin. We need this to know            // how much memory to reserve in the C structures.
+var initialised=false; // Can only be started once.
+
+function start(options,callback){
+    if (initialised){
+        callback({
+            result:"error",
+            error:"Already started"
+        });
+        return;
+    }
+    if (!options){
+        options={};
+    }
+    // Let's create the domainReg structure in Javascript so that it is a piece of cake
+    // to do what we have to do in C++
+    var domainEntries=[];
+    for (var i=0; i<pinList.length; i++){
+        var pin=pinList[i];
+        var slave=getSlave(pin.slaveId);
+        if (!slave){
+            callback({
+                result:"error",
+                error:"Inconsistency error. Cannot find slave: "+pin.slaveId
+            });
+            return;
+        }
+        domainEntries.push({
+            alias:slave.position.alias,
+            position:slave.position.index,
+            vendor_id:slave.config.id.vendor,
+            product_code:slave.config.id.product,
+            index:pin.index,
+            subindex:pin.subindex,
+            offset:-1,
+            name:pin.name
+        });
+    }
+    options.domainEntries=domainEntries;
+    var result=ethercat.start(options);
+    //Reassign the offsets to the pins. Now we now the offsets
+    for (var i=0; i<domainEntries.length; i++){
+        var entry=domainEntries[i];
+        var pin=pins[entry.name];
+        if (!pin){
+            callback({result:"error",error:"data inconsistency"});
+            return;
+        }
+        pin.offset=entry.offset;
+    }
+    callback(result);
 }
 
+function addPin(options){
+    var name=options.name;
+    var size=options.size;
+    var type=options.type;
+    var slaveId=options.slaveId;
+    var index=options.index;
+    var subindex=options.subindex;
+
+    if (pins[name]){
+        return -1;
+    }
+    var pin={
+        name:name,
+        offset:-1, // indica que aún no sabemos el offset. No esta "bound"
+        size:size,
+        type:type,
+        slaveId:slaveId,
+        index:index,
+        subindex:subindex
+    }
+    pinList.push(pin);
+    pins[name]=pin;
+    numPins++;
+    return pinList.length-1;
+}
+// Prints on stdout information about a slave. This is for debugging purposes only
 function printSlave(index){
     ethercat.printSlave(index);
 }
+
+function getSlave(id){
+    for (var i=0; i<slaveList.length; i++){
+        var slave=slaveList[i];
+        if (slave.id==id){
+            return slave;
+        }
+    }
+}
+
 function addSlave(options,callback){
     if (!options){
         callback({result:"error",error:"Please provide slave data"});
         return;
     }
-    var name=options.name;
+    var id=options.id;
 
-    if (!name){
-        callback({result:"error",error:"Please provide slave name"});
+    if (!id){
+        callback({result:"error",error:"Please provide slave id"});
         return;
     }
-    if (slaves[name]){
+    if (getSlave[id]){
         callback({result:"error",error:"Duplicate slave. Please provide unique slave names"});
         return;
     }
@@ -118,6 +225,11 @@ function addSlave(options,callback){
                         callback({result:"error",error:"Unknown pdo type: "+entryType});
                         return;
                 }
+                var fullPinName=id+"."+entryName;
+                var pinIndex=addPin({slaveId:id,name:fullPinName,size:bitLength,type:entryType,index:entry.index,subindex:entry.subindex});
+                if (pinIndex==-1){
+                    callback({result:"error",error:"Cannot add pin "+fullPinName+". Probably duplicated "})
+                }
                 entry.bitLength=bitLength;
 
             }
@@ -130,16 +242,19 @@ function addSlave(options,callback){
         return;
     }
     var index=res.data.index;
-    console.log("adding ethercat slave on index: ",index);
-    slaves[name]={
-        index:index,
-        options:options
-    }
+    slaveList.push(options);
+    slaves[id]=options;
     callback(res);
 }
+
+function getPins(){
+    return pins;
+}
+
 module.exports={
     start:start,
     addSlave:addSlave,
-    printSlave:printSlave
+    printSlave:printSlave,
+    getPins:getPins
 }
 

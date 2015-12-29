@@ -10,8 +10,8 @@ var rtaSlave={
                 {
                     index: 0x1601,
                     entries: [
-                        {index: 0x6040, subIndex: 0x0, name: "offControlWord0", type: "uint16"},
-                        {index: 0x607a, subIndex: 0x0, name: "targetPosition0", type: "int32"}
+                        {index: 0x6040, subindex: 0x0, name: "controlWord", type: "uint16"},
+                        {index: 0x607a, subindex: 0x0, name: "targetPosition", type: "int32"}
                     ]
                 }
             ],
@@ -24,8 +24,8 @@ var rtaSlave={
                 {
                     index: 0x1A01,
                     entries: [
-                        {index: 0x6041, subIndex: 0x0, name: "statusWord0", type: "uint16"},
-                        {index: 0x6064, subIndex: 0x0, name: "actualPosition0", type: "int32"}
+                        {index: 0x6041, subindex: 0x0, name: "statusWord", type: "uint16"},
+                        {index: 0x6064, subindex: 0x0, name: "actualPosition", type: "int32"}
                     ]
                 }
             ],
@@ -36,7 +36,7 @@ var rtaSlave={
 
 var slaves=[
     {
-        name: "rta1",
+        id: "rta1",
         position: {
             alias: 0,
             index: 0
@@ -44,7 +44,7 @@ var slaves=[
         config: rtaSlave
     },
     {
-        name:"rta2",
+        id:"rta2",
         position:{
             alias:0,
             index:1
@@ -69,5 +69,8 @@ function addSlaves(index,callback){
 }
 
 addSlaves(0,function(res){
-    console.log(res);
+    var pins=ethercat.getPins();
+    ethercat.start({},function(res){
+        console.log(res);
+    });
 })
