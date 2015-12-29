@@ -65,6 +65,7 @@ function start(options,callback){
     options.domainEntries=domainEntries;
     var result=ethercat.start(options);
     //Reassign the offsets to the pins. Now we now the offsets
+    console.log(domainEntries);
     for (var i=0; i<domainEntries.length; i++){
         var entry=domainEntries[i];
         var pin=pins[entry.name];
@@ -93,11 +94,36 @@ function addPin(options){
     if (pins[name]){
         return -1;
     }
+    var fastType=0;
+    switch(type){
+        case "uint8":
+            fastType=0;
+            break;
+        case "int8":
+            fastType=1;
+            break;
+        case "uint16":
+            fastType=2;
+            break;
+        case "int16":
+            fastType=3;
+            break;
+        case "uint32":
+            fastType=4;
+            break;
+        case "int32":
+            fastType=5;
+            break;
+        default:
+            callback({result:"error",error:"Unknown pdo type: "+entryType});
+            return;
+    }
     var pin={
         name:name,
         offset:-1, // indica que aún no sabemos el offset. No esta "bound"
         size:size,
         type:type,
+        fastType:fastType,
         slaveId:slaveId,
         index:index,
         subindex:subindex
@@ -256,11 +282,32 @@ function getPins(){
     return pins;
 }
 
+function readPin(name){
+    var pin=pins[name];
+    if (!pin){
+        console.log("error reading pin: "+name);
+    }
+    if (pin && pin.offset!=-1){
+        var v=ethercat.readPin(pin.offset,pin.fastType);
+        return v;
+    }
+}
+
+function writePin(name,value){
+    var pin=pins[name];
+    if (!pin){
+        return undefined;
+    }
+}
+
+
 module.exports={
     start:start,
     activate:activate,
     addSlave:addSlave,
     printSlave:printSlave,
-    getPins:getPins
+    getPins:getPins,
+    readPin:readPin,
+    writePin:writePin
 }
 

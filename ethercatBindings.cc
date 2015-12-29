@@ -614,14 +614,59 @@ void activate(const FunctionCallbackInfo<Value>&args){
     args.GetReturnValue().Set(res);
 }
 
+void readPin(const FunctionCallbackInfo<Value>&args){
+    Isolate *isolate=Isolate::GetCurrent();
+    HandleScope scope(isolate);
 
+    int offset=args[0]->NumberValue();
+    int type=args[1]->NumberValue();
+
+    uint8_t uint8;
+    uint8_t int8;
+    uint16_t uint16;
+    int16_t int16;
+    uint32_t uint32;
+    int32_t int32;
+    switch(type){
+        case 0: //uint8
+            uint8=EC_READ_U8(domain_pd+offset);
+            args.GetReturnValue().Set(Number::New(isolate,uint8));
+            break;
+        case 1: //int8
+            int8=EC_READ_S8(domain_pd+offset);
+            args.GetReturnValue().Set(Number::New(isolate,int8));
+            break;
+        case 2: //uint16
+            uint16=EC_READ_U16(domain_pd+offset);
+            args.GetReturnValue().Set(Number::New(isolate,uint16));
+            break;
+        case 3: //int16
+            int16=EC_READ_S16(domain_pd+offset);
+            args.GetReturnValue().Set(Number::New(isolate,int16));
+            break;
+        case 4: //uint32
+            uint32=EC_READ_U32(domain_pd+offset);
+            args.GetReturnValue().Set(Number::New(isolate,uint32));
+            break;
+        case 5: //int32
+            int32=EC_READ_S32(domain_pd+offset);
+            args.GetReturnValue().Set(Number::New(isolate,int32));
+            break;
+
+    }
+}
+
+void writePin(const FunctionCallbackInfo<Value>&args){
+
+
+}
 void init(Handle<Object> exports) {
-
   NODE_SET_METHOD(exports,"addSlave",addSlave);
   NODE_SET_METHOD(exports,"printSlave",printSlave);
   NODE_SET_METHOD(exports,"start", start);
   NODE_SET_METHOD(exports,"activate",activate);
-
+  NODE_SET_METHOD(exports,"readPin",readPin);
+  NODE_SET_METHOD(exports,"writePin",writePin);
 }
 
 NODE_MODULE(ethercat, init)
