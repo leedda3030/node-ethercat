@@ -35,6 +35,17 @@ function start(options,callback){
         });
         return;
     }
+    var oldCallback=callback;
+    callback=function(res){
+        if (oldCallback.fired){
+            return;
+        }
+        if (res.result=="ok"){
+            initialised=true;
+        }
+        oldCallback.fired=true;
+        oldCallback(res);
+    }
     if (!options){
         options={};
     }
@@ -54,8 +65,8 @@ function start(options,callback){
         domainEntries.push({
             alias:slave.position.alias,
             position:slave.position.index,
-            vendor_id:slave.config.id.vendor,
-            product_code:slave.config.id.product,
+            vendor_id:slave.definition.id.vendor,
+            product_code:slave.definition.id.product,
             index:pin.index,
             subindex:pin.subindex,
             offset:-1,
@@ -63,9 +74,13 @@ function start(options,callback){
         });
     }
     options.domainEntries=domainEntries;
-    var result=ethercat.start(options);
+    var res=ethercat.start(options);
+    if (res.result=="error"){
+        callback(res);
+        return;
+    }
+
     //Reassign the offsets to the pins. Now we now the offsets
-    console.log(domainEntries);
     for (var i=0; i<domainEntries.length; i++){
         var entry=domainEntries[i];
         var pin=pins[entry.name];
@@ -75,25 +90,73 @@ function start(options,callback){
         }
         pin.offset=entry.offset;
     }
-    callback(result);
+    // Now we will write configuration values for the slaves
+    function configSlave(slave,index,callback){
+        var config=slave.config;
+        if (!config || index>=config.length){
+            callback({result:"ok",data:{}});
+            return;
+        }
+        var record=config[index];
+        if (!record){
+            configSlave(slave,index+1,callback);
+            return;
+        }
+        switch(record.type){
+            case "sdo":
+                var params=record.params;
+                var params={
+                    slaveId:slave.id,
+                    index:params.index,
+                    subindex:params.subindex,
+                    type:params.type,
+                    value:params.value
+                }
+                configSdo(params,function(res){
+                    if (res.result=="error"){
+                        callback(res);
+                        return;
+                    }
+                    configSlave(slave,index+1,callback);
+                })
+                break;
+            default:
+                callback({result:"error",error:"Unsupported configuration type: "+record.type});
+                return;
+        }
+
+    }
+
+    function configSlaves(index,callback){
+        if (!slaveList.length || index>=slaveList.length){
+            callback({result:"ok",data:{}});
+            return;
+        }
+        var slave=slaveList[index];
+        if (slave && slave.config && slave.config.length){
+            configSlave(slave,0,function(res){
+                if (res.result=="error"){
+                    callback(res);
+                    return;
+                }
+                configSlaves(index+1,callback);
+            })
+        }else{
+            configSlaves(index+1,callback);
+        }
+    }
+    configSlaves(0,function(res){
+        callback(res);
+    })
 }
 
 function activate(options,callback){
-    var res=ethercat.activate();
+    var res=ethercat.activate(options);
     callback(res);
 }
 
-function addPin(options){
-    var name=options.name;
-    var size=options.size;
-    var type=options.type;
-    var slaveId=options.slaveId;
-    var index=options.index;
-    var subindex=options.subindex;
-
-    if (pins[name]){
-        return -1;
-    }
+// Returns a number value from string type value. C functions use fastType instead of type
+function fastTypeFromType(type){
     var fastType=0;
     switch(type){
         case "uint8":
@@ -115,9 +178,29 @@ function addPin(options){
             fastType=5;
             break;
         default:
-            callback({result:"error",error:"Unknown pdo type: "+entryType});
+            fastType=-1;
             return;
     }
+    return fastType;
+}
+
+function addPin(options){
+    var name=options.name;
+    var size=options.size;
+    var type=options.type;
+    var slaveId=options.slaveId;
+    var index=options.index;
+    var subindex=options.subindex;
+
+    if (pins[name]){
+        return -1;
+    }
+    var fastType=fastTypeFromType(type);
+    if (fastType==-1){
+        callback({result:"error",error:"Unknown pdo type: "+type});
+        return;
+    }
+
     var pin={
         name:name,
         offset:-1, // indica que aún no sabemos el offset. No esta "bound"
@@ -165,20 +248,20 @@ function addSlave(options,callback){
     if (options.position===undefined ||
         options.position.alias===undefined ||
         options.position.index===undefined ||
-        options.config === undefined ||
-        options.config.id === undefined ||
-        options.config.id.vendor ===undefined ||
-        options.config.id.product === undefined ||
-        options.config.syncs ===undefined
+        options.definition === undefined ||
+        options.definition.id === undefined ||
+        options.definition.id.vendor ===undefined ||
+        options.definition.id.product === undefined ||
+        options.definition.syncs ===undefined
     ){
-        callback({result:"error",error:"Wrong configuration for slave. Please check parameters"});
+        callback({result:"error",error:"Wrong definition for slave. Please check parameters"});
         return;
     }
-    var syncs=options.config.syncs;
+    var syncs=options.definition.syncs;
     for (var s=0; s<syncs.length; s++){
         var sync=syncs[s];
         if (sync.syncManager===undefined){
-            callback({result:"error",error:"Wrong sync configuration for slave. Please specify syncManager index"});
+            callback({result:"error",error:"Wrong sync definition for slave. Please specify syncManager index"});
             return;
         }
         var direction=sync.direction;
@@ -273,6 +356,7 @@ function addSlave(options,callback){
         return;
     }
     var index=res.data.index;
+    options.index=index;
     slaveList.push(options);
     slaves[id]=options;
     callback(res);
@@ -286,6 +370,11 @@ function readPin(name){
     var pin=pins[name];
     if (!pin){
         console.log("error reading pin: "+name);
+        return undefined;
+    }
+    if (pin.offset==-1){
+        console.log("Error reading pin. offset=-1, for name: "+name);
+        return undefined;
     }
     if (pin && pin.offset!=-1){
         var v=ethercat.readPin(pin.offset,pin.fastType);
@@ -296,10 +385,63 @@ function readPin(name){
 function writePin(name,value){
     var pin=pins[name];
     if (!pin){
+        console.log("error writing pin: "+name);
         return undefined;
+    }
+    if (pin.offset==-1){
+        console.log("Error writing pin. offset=-1, for name: "+name);
+    }
+    if (value===undefined){
+        throw "writePin please provide value";
+    }
+    if (pin && pin.offset!=-1){
+        ethercat.writePin(pin.offset,pin.fastType,value);
     }
 }
 
+function configSdo(options,callback){
+    var slaveId=options.slaveId;
+    var index=options.index;
+    var subindex=options.subindex||0;
+    var type=options.type; // "uint8","int8","uint16","int16","uint32","int32"
+    var value=options.value;
+
+    var slave=slaves[slaveId];
+    if (!slave){
+        callback({result:"error",error:"Cannot find slave with Id"+slaveId});
+        return;
+    }
+    if (isNaN(value)){
+        callback({result:"error",error:"Please supply valid value"});
+        return;
+    }
+
+    var fastType=fastTypeFromType(type);
+    if (fastType==-1){
+        callback({result:"error",error:"Please specify sdo type"});
+        return;
+    }
+    var res=ethercat.configSdo(slave.index,index,subindex,fastType,value);
+    if (!res){
+        res={result:"ok",data:{}};
+    }
+    callback(res);
+/*
+
+ void configSdo(const FunctionCallbackInfo<Value>&args){
+
+ int slaveIndex=args[0]->NumberValue(); // we fetch slave index
+ int sdoIndex=args[1]->NumberValue(); // we fetch sdoIndex
+ int sdoSubIndex=args[2]->NumberValue(); // we fetch sdoSubIndex
+ int type=args[3]->NumberValue(); // we fetch size
+ int value=args[4]->NumberValue(); // we fetch the value
+     */
+}
+
+function getMasterState(){
+    var masterState=ethercat.getMasterState();
+    return masterState;
+}
 
 module.exports={
     start:start,
@@ -308,6 +450,8 @@ module.exports={
     printSlave:printSlave,
     getPins:getPins,
     readPin:readPin,
-    writePin:writePin
+    writePin:writePin,
+    configSdo:configSdo,
+    getMasterState:getMasterState
 }
 

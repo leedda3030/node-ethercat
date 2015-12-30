@@ -1,107 +1,74 @@
 var ethercat = require('./node-ethercat');
 
-var rtaSlave={
-    id: {vendor: 0x0000017f, product: 0x00000014},
-    syncs: [
-        {
-            syncManager: 2,
-            direction: "output",
-            pdos: [
-                {
-                    index: 0x1601,
-                    entries: [
-                        {index: 0x6040, subindex: 0x0, name: "controlWord", type: "uint16"},
-                        {index: 0x607a, subindex: 0x0, name: "targetPosition", type: "int32"}
-                    ]
-                }
-            ],
-            watchdog: "disable"
-        },
-        {
-            syncManager: 3,
-            direction: "input",
-            pdos: [
-                {
-                    index: 0x1A01,
-                    entries: [
-                        {index: 0x6041, subindex: 0x0, name: "statusWord", type: "uint16"},
-                        {index: 0x6064, subindex: 0x0, name: "actualPosition", type: "int32"}
-                    ]
-                }
-            ],
-            watchdog: "disable"
-        }
-    ]
-}
+var rtaSlave=require('./sampleConfigs/rta_x_plus.json');
+var simpleCardSlave=require('./sampleConfigs/simpleCard.json');
 
-var simpleCardSlave={
-    id: {vendor: 3543808, product: 0xcacb},
-    syncs: [
-        {
-            syncManager: 2,
-            direction: "output",
-            pdos: [
-                {
-                    index: 0x1601,
-                    entries: [
-                        {index: 0x7010, subindex: 0x0, name: "Position0", type: "int32"},
-                        {index: 0x7011, subindex: 0x0, name: "Position1", type: "int32"},
-                        {index: 0x7012, subindex: 0x0, name: "Position2", type: "int32"},
-                        {index: 0x7013, subindex: 0x0, name: "Position3", type: "int32"},
-                        {index: 0x7014, subindex: 0x0, name: "ControlWord", type: "uint32"},
-                    ]
-                }
-            ],
-            watchdog: "disable"
-        },
-        {
-            syncManager: 3,
-            direction: "input",
-            pdos: [
-                {
-                    index: 0x1A00,
-                    entries: [
-                        {index: 0x6001, subindex: 0x0, name: "Encoder0", type: "int32"},
-                        {index: 0x6002, subindex: 0x0, name: "Encoder1", type: "int32"},
-                        {index: 0x6003, subindex: 0x0, name: "Encoder2", type: "int32"},
-                        {index: 0x6004, subindex: 0x0, name: "Encoder3", type: "int32"},
-                        {index: 0x6005, subindex: 0x0, name: "statusWord", type: "uint32"}
-                    ]
-                }
-            ],
-            watchdog: "disable"
+// Specific device configuration. Will be written to the device on "start" call
+var rtaConfig=[
+    {
+        "id":"configValue1",
+        "type":"sdo",
+        "params":{
+            "index":"0x6060",
+            "subindex":0,
+            "type":"uint8",
+            "value":8
         }
-    ]
-}
+    },
+    {
+        "id":"configValue2",
+        "type":"sdo",
+        "params":{
+            "index":"0x3206",
+            "subindex":0,
+            "type":"uint8",
+            "value":1
+        }
+    },
+    {
+        "id":"configValue3",
+        "type":"sdo",
+        "params":{
+            "index":"0x6081",
+            "subindex":0,
+            "type":"uint32",
+            "value":400
+        }
+    }
+]
 
 var slaves=[
     {
-        id: "rta1",
+        id: "rta0",
         position: {
             alias: 0,
             index: 0
         },
-        config: rtaSlave
+        definition: rtaSlave,
+        config:rtaConfig
     },
     {
-        id:"rta2",
+        id:"rta1",
         position:{
             alias:0,
             index:1
         },
-        config:rtaSlave
+        definition:rtaSlave,
+        config:rtaConfig
     },
     {
-        id:"simpleCard1",
+        id:"simpleCard0",
         position:{
             alias:0,
             index:2
         },
-        config:simpleCardSlave
+        definition:simpleCardSlave
     }
 ]
 
+
 function addSlaves(index,callback){
+    console.log("adding slave "+index+" slaves length=",slaves.length);
     if (index>=slaves.length){
         callback({result:"ok",data:{}});
         return;
@@ -116,17 +83,63 @@ function addSlaves(index,callback){
     })
 }
 
+waitForTorqueTime=1000;
+
 addSlaves(0,function(res){
+    if (res.result=="error"){
+        console.log(res);
+        return;
+    }
     var pins=ethercat.getPins();
+    console.log("calling start");
     ethercat.start({},function(res){
-        ethercat.activate({},function(res){
+        if (res.result=="error"){
+            console.log(res);
+            return;
+        }
+        console.log("start success");
+        ethercat.activate({semaphoreName3:"ethercatSemaphore"},function(res){
+            ethercat.writePin("rta0.controlWord",6);
+            ethercat.writePin("rta1.controlWord",6);
+            setTimeout(function(){
+                ethercat.writePin("rta0.controlWord",0x1f);
+                ethercat.writePin("rta1.controlWord",0x1f);
+                console.log("Starting torque");
+                setTimeout(function(){
+                    console.log("Activating drives");
+                    setTimeout(function(){
+                        ethercat.writePin("rta0.controlWord",0x6);
+                        ethercat.writePin("rta1.controlWord",0x6);
+                        console.log("ControlWord=6");
+                        setTimeout(function(){
+                            console.log("Deactivating drives");
+                            setTimeout(function(){
+                                ethercat.writePin("rta0.controlWord",0x1f);
+                                ethercat.writePin("rta1.controlWord",0x1f);
+                                console.log("Activating torque again");
+                                setTimeout(function(){
+                                    console.log("Activating system again");
+                                    started=true;
+                                    console.log("EthercatRT started");
+                                    return;
+
+                                })
+                            },waitForTorqueTime)
+                        },waitForTorqueTime)
+                    },waitForTorqueTime)
+                },waitForTorqueTime)
+            },waitForTorqueTime)
             console.log(res);
         })
+
     });
 })
 function dummy(){
     setTimeout(dummy,1000);
+    var controlWord=ethercat.readPin('rta1.statusWord');
     var pos=ethercat.readPin('rta1.actualPosition');
-    console.log("rta1.actualPosition: "+pos);
+    var masterState=ethercat.getMasterState();
+    console.log("masterStatue",masterState);
+    console.log("rta1.controlWord: "+controlWord+" rta1.actualPosition: "+pos);
 };
 dummy();

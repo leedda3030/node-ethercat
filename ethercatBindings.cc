@@ -21,6 +21,7 @@ Please take into account that some structures (like pin names and offsets) are k
 #include <sys/types.h>
 #include <unistd.h>
 #include <sys/syscall.h>
+#include <semaphore.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <sched.h>
@@ -30,6 +31,7 @@ Please take into account that some structures (like pin names and offsets) are k
 #include <string.h>
 #include <math.h>
 #include <vector>
+#include <string>
 /****************************************************************************/
 extern "C"{
     #include "ecrt.h"
@@ -74,7 +76,7 @@ static uint8_t *domain_pd=NULL; // process data
 
 vector <SSlave> slaves;
 static bool initialised=false;
-static bool active = false;
+static bool cycle_active = false; // Indicates if the cyclic task is active
 
 
 /****************************************************************************/
@@ -125,62 +127,20 @@ void check_master_state(void)
 
 
 
-static int _cycles=0;
-int cycleStatus=0;
-timespec cur_time;
-
-void _cycle_start(){
-        _cycles++;
-
-        ecrt_master_send(master);
-
-        clock_gettime(CLOCK_REALTIME, &cur_time);
-        ecrt_master_application_time(master, EC_NEWTIMEVAL2NANO(cur_time));
-        ecrt_master_sync_reference_clock(master);
-        ecrt_master_sync_slave_clocks(master);
-        ecrt_master_receive(master);
-}
-
-void _cycle_end(char *hal){
-    clock_gettime(CLOCK_REALTIME, &cur_time);
-    check_master_state();
-    ecrt_domain_process(domain);
-    ecrt_domain_queue(domain);
-}
-
-
-/****************************************************************************/
-
-int _start()
-{
-    printf("Requesting master 0\n");
-    master = ecrt_request_master(0);
-    if (!master)
-        return -1;
-    printf("Master 0 obtained\n");
-    domain = ecrt_master_create_domain(master);
-    if (!domain)
-        return -1;
-
-    printf("Configuring PDOs...\n");
-    printf("PDOs configured\n");
-    printf("CheckPoint 5 \n");
-    printf("Activating master...\n");
-    if (ecrt_master_activate(master))
-        return -1;
-    if (!(domain_pd = ecrt_domain_data(domain))) {
-        return -1;
-    }
-    printf("Started 2.\n");
-    return 0;
-}
-
 
 void setError(const FunctionCallbackInfo<Value>&args,char *msg){
     Isolate *isolate=Isolate::GetCurrent();
     Local<Object> res=Object::New(isolate);
     res->Set(String::NewFromUtf8(isolate,"result"),String::NewFromUtf8(isolate,"error"));
     res->Set(String::NewFromUtf8(isolate,"error"),String::NewFromUtf8(isolate,msg));
+    args.GetReturnValue().Set(res);
+}
+
+void setError(const FunctionCallbackInfo<Value>&args,Local<String> msg){
+    Isolate *isolate=Isolate::GetCurrent();
+    Local<Object> res=Object::New(isolate);
+    res->Set(String::NewFromUtf8(isolate,"result"),String::NewFromUtf8(isolate,"error"));
+    res->Set(String::NewFromUtf8(isolate,"error"),msg);
     args.GetReturnValue().Set(res);
 }
 
@@ -216,9 +176,8 @@ void start(const FunctionCallbackInfo<Value>& args) {
 
 
     int numSlaves=slaves.size();
-    printf("We have a total of %d slaves\n",numSlaves);
     for (int s=0; s<numSlaves; s++){
-        SSlave slave=slaves[s];
+        SSlave &slave=slaves[s];
         int positionAlias=slave.positionAlias;
         int positionIndex=slave.positionIndex;
         int vendorId=slave.vendorId;
@@ -228,7 +187,6 @@ void start(const FunctionCallbackInfo<Value>& args) {
             setError(args,(char *)"Cannot get slave_config");
             return;
         }
-        printf("Configuring pdos for slave %d, numSyncs: %d\n",s,slave.numSyncs);
         if (ecrt_slave_config_pdos(slave.slave_config,slave.numSyncs,slave.syncs)){
             setError(args,(char *)"Cannot configure slave pdos for slave");
             return;
@@ -258,25 +216,13 @@ void start(const FunctionCallbackInfo<Value>& args) {
     for(int i=0; i<numEntries; i++){
         Local<Object>entry=domainEntries->Get(i)->ToObject();
         entry->Set(String::NewFromUtf8(isolate,"offset"),Number::New(isolate,offsets[i]));
-        printf("Entry %d, offset %d\n",i,offsets[i]);
     }
 
-        Local<Object> res=Object::New(isolate);
-        res->Set(String::NewFromUtf8(isolate,"result"),String::NewFromUtf8(isolate,"ok"));
-        res->Set(String::NewFromUtf8(isolate,"data"),Object::New(isolate));
-        args.GetReturnValue().Set(res);
+    Local<Object> res=Object::New(isolate);
+    res->Set(String::NewFromUtf8(isolate,"result"),String::NewFromUtf8(isolate,"ok"));
+    res->Set(String::NewFromUtf8(isolate,"data"),Object::New(isolate));
+    args.GetReturnValue().Set(res);
 
-/*    if (!ecrt_master_activate(master)){
-        setError(args,(char *)"Cannot activate master");
-        return;
-    }
-    domain_pd=ecrt_domain_data(domain);
-    if (!domain_pd){
-        setError(args,(char*)"Did not get domain data");
-        return;
-    }*/
-
-//    _start();
 
 
 }
@@ -284,7 +230,7 @@ void start(const FunctionCallbackInfo<Value>& args) {
 
 
 
-
+//Print slave config to the console for debugging purposes
 void printSlave(const FunctionCallbackInfo<Value>&args){
     Local<Value> vIndex=args[0];
     if (!vIndex->IsNumber()){
@@ -294,7 +240,7 @@ void printSlave(const FunctionCallbackInfo<Value>&args){
     if (index>slaves.size()){
         return;
     }
-    SSlave slave=slaves[index];
+    SSlave &slave=slaves[index];
     int numSyncs=slave.numSyncs;
     printf("Slave %d, has %d syncs\n",index,numSyncs);
     for (int i=0; i<numSyncs; i++){
@@ -351,31 +297,31 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
     }
     int positionIndex=vIndex->NumberValue();
 
-    Local<Value>config=options->ToObject()->Get(String::NewFromUtf8(isolate,"config"));
-    if (!config->IsObject()){
-        setError(args,(char *)"config mut be an object");
+    Local<Value>definition=options->ToObject()->Get(String::NewFromUtf8(isolate,"definition"));
+    if (!definition->IsObject()){
+        setError(args,(char *)"definition mut be an object");
         return;
     }
 
-    Local<Value> id=config->ToObject()->Get(String::NewFromUtf8(isolate,"id"));
+    Local<Value> id=definition->ToObject()->Get(String::NewFromUtf8(isolate,"id"));
     if (!id->IsObject()){
         setError(args,(char *)"id must be an object");
         return;
     }
     Local<Value>vVendorId=id->ToObject()->Get(String::NewFromUtf8(isolate,"vendor"));
-    if (!vVendorId->IsNumber()){
-        setError(args,(char *)"vendor Must be a number");
+    if (vVendorId->IsUndefined()){
+        setError(args,(char *)"Please specify vendor id");
         return;
     }
     Local<Value>vProductId=id->ToObject()->Get(String::NewFromUtf8(isolate,"product"));
-    if (!vProductId->IsNumber()){
-        setError(args,(char *)"product Must be a number");
+    if (vProductId->IsUndefined()){
+        setError(args,(char *)"Please specify product code");
         return;
     }
     int vendorId=vVendorId->NumberValue();
     int productId=vProductId->NumberValue();
 
-    Local<Value>syncs=config->ToObject()->Get(String::NewFromUtf8(isolate,"syncs"));
+    Local<Value>syncs=definition->ToObject()->Get(String::NewFromUtf8(isolate,"syncs"));
     if (!syncs->IsArray()){
         setError(args,(char *)"Please provide valid sync data");
     }
@@ -432,8 +378,8 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
                 return;
             }
             Local<Value>vPdoIndex=oPdo->ToObject()->Get(String::NewFromUtf8(isolate,"index"));
-            if (!vPdoIndex->IsNumber()){
-                setError(args,(char *)"index property in pdo must be a number");
+            if (vPdoIndex->IsUndefined()){
+                setError(args,(char *)"Please enter index property");
                 return;
             }
             unsigned int uPdoIndex=vPdoIndex->NumberValue();
@@ -446,18 +392,18 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
             for (int i=0; i<numEntries; i++){
                 Local<Value>oEntry=Local<Array>::Cast(entries)->Get(i)->ToObject();
                 Local<Value>vEntryIndex=oEntry->ToObject()->Get(String::NewFromUtf8(isolate,"index"));
-                if (!vEntryIndex->IsNumber()){
-                    setError(args,(char *)"index property in pdo must be a number");
+                if (vEntryIndex->IsUndefined()){
+                    setError(args,(char *)"Please provide pdo index");
                     return;
                 }
                 Local<Value>vSubIndex=oEntry->ToObject()->Get(String::NewFromUtf8(isolate,"subindex"));
-                if (!vSubIndex->IsNumber()){
-                    setError(args,(char *)"subIndex property in pdo must be a number");
+                if (vSubIndex->IsUndefined()){
+                    setError(args,(char *)"subIndex property not supplied");
                     return;
                 }
                 Local<Value>vBitLength=oEntry->ToObject()->Get(String::NewFromUtf8(isolate,"bitLength"));
-                if (!vBitLength->IsNumber()){
-                    setError(args,(char *)"bit length must be a number");
+                if (vBitLength->IsUndefined()){
+                    setError(args,(char *)"Please specify bit length");
                     return;
                 }
 
@@ -496,6 +442,30 @@ void addSlave(const FunctionCallbackInfo<Value>&args){
 
 }
 
+/**********************************************************************/
+
+// CYCLIC TASK
+/*
+NOTES:
+
+Cyclic task for ethercat can be performed in two ways:
+
+ 1. Using nanosleep
+ 2. Syncinc using a named semaphore
+
+ The first option is supplied in case you want to implement the logic of CNC within the same
+ process as the process running ethercatBinding and then use some method to call the different
+ routines in order.
+
+ The second option is supplied so that the ethercat cyclic call can be synchronized with another
+ process performing the realtime CNC calculations.
+
+ The semaphore will  be created by the other process and its name must be passed in the "activate" function.
+ Note that the semaphore to be created should be created with value 0, so that the ethercat cyclic task
+ waits for its relase.
+
+*/
+
 
 pthread_t cycleId;
 
@@ -527,6 +497,8 @@ double accumDif=0;
 double avgDif=0;
 unsigned long curTime=0;
 unsigned long curSecs=0;
+string semName; // Name of the semaphore. If NULL, we will use sleep.
+sem_t * sem=NULL; // semaphore
 
 void * cycle(void *arg){
     struct sched_param param;
@@ -572,21 +544,27 @@ void * cycle(void *arg){
     nanosleep(&wait_time,NULL);
     wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec) % LOOP_PERIOD_NS);
     nanosleep(&wait_time,NULL);
+    // Let's create semaphore
     printf("Entering loop\n");
-    while (1) {
+    while (cycle_active) {
         _times++;
 
         ecrt_master_send(master);
         ecrt_master_receive(master);
+        ecrt_master_state(master, &master_state);
 
+        if (!sem){
+            clock_gettime(CLOCK_REALTIME, &cur_time);
+            wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec) % LOOP_PERIOD_NS);
+            nanosleep(&wait_time, NULL);
+        }else{
+            sem_wait(sem); // We wait for the semaphore before continuing. Please use with care
+        }
 
         ecrt_domain_process(domain);
         ecrt_domain_queue(domain);
-        clock_gettime(CLOCK_REALTIME, &cur_time);
-        wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec) % LOOP_PERIOD_NS);
-        nanosleep(&wait_time, NULL);
-        clock_gettime(CLOCK_REALTIME, &cur_time);
     }
+    return NULL;
 }
 
 //Activates the master
@@ -594,9 +572,26 @@ void activate(const FunctionCallbackInfo<Value>&args){
     Isolate *isolate=Isolate::GetCurrent();
     HandleScope scope(isolate);
     printf("Calling activate\n");
-    if (active){
+    if (cycle_active){
         setError(args,(char *)"Ehtercat already active");
         return;
+    }
+    cycle_active=true;
+    // Let's get the semaphore name
+    Local<Value>options=args[0];
+    if (options->IsObject()){
+        Local<Value>semaphoreName=options->ToObject()->Get(String::NewFromUtf8(isolate,"semaphoreName"));
+        if (semaphoreName->IsString()){
+            String::Utf8Value semaphoreNameUtf8(semaphoreName->ToString());
+            semName=*semaphoreNameUtf8;
+            if (semName.length()){
+                sem=sem_open(semName.c_str(),0);
+                if (!sem){
+                    setError(args,String::NewFromUtf8(isolate,"Semaphore not found"));
+                    return;
+                }
+            }
+        }
     }
     pthread_create(&cycleId,NULL,&cycle,NULL);
     if (ecrt_master_activate(master)){
@@ -627,6 +622,7 @@ void readPin(const FunctionCallbackInfo<Value>&args){
     int16_t int16;
     uint32_t uint32;
     int32_t int32;
+
     switch(type){
         case 0: //uint8
             uint8=EC_READ_U8(domain_pd+offset);
@@ -652,14 +648,87 @@ void readPin(const FunctionCallbackInfo<Value>&args){
             int32=EC_READ_S32(domain_pd+offset);
             args.GetReturnValue().Set(Number::New(isolate,int32));
             break;
-
     }
 }
 
 void writePin(const FunctionCallbackInfo<Value>&args){
+    Isolate *isolate=Isolate::GetCurrent();
+    HandleScope scope(isolate);
 
+    int offset=args[0]->NumberValue();
+    int type=args[1]->NumberValue();
+    int value=args[2]->NumberValue();
 
+    switch(type){
+        case 0: //uint8
+            EC_WRITE_U8(domain_pd+offset,value);
+            break;
+        case 1: //int8
+            EC_WRITE_S8(domain_pd+offset,value);
+            break;
+        case 2: //uint16
+            EC_WRITE_U16(domain_pd+offset,value);
+            break;
+        case 3: //int16
+            EC_WRITE_S16(domain_pd+offset,value);
+            break;
+        case 4: //uint32
+            EC_WRITE_U32(domain_pd+offset,value);
+            break;
+        case 5: //int32
+            EC_WRITE_S32(domain_pd+offset,value);
+            break;
+    }
 }
+
+void getMasterState(const FunctionCallbackInfo<Value>&args){
+    Isolate *isolate=Isolate::GetCurrent();
+    HandleScope scope(isolate);
+
+    Local<Object> obj=Object::New(isolate);
+    obj->Set(String::NewFromUtf8(isolate,"slaves_responding"),Number::New(isolate,master_state.slaves_responding));
+    obj->Set(String::NewFromUtf8(isolate,"al_states"),Number::New(isolate,master_state.al_states));
+    obj->Set(String::NewFromUtf8(isolate,"link_up"),Number::New(isolate,master_state.link_up));
+    args.GetReturnValue().Set(obj);
+}
+
+
+// DO NOT CALL FUNCTIONS LIKE THIS DIRECTLY, THEY DO NOT MAKE ANY
+// TYPE CHECKING OR PARAMETERS CHECKING. ALL TYPE CHECKING MUST BE
+// PERFORMED IN JAVASCRIPT BY THE CALLER
+void configSdo(const FunctionCallbackInfo<Value>&args){
+
+    int slaveIndex=args[0]->NumberValue(); // we fetch slave index
+    int sdoIndex=args[1]->NumberValue(); // we fetch sdoIndex
+    int sdoSubIndex=args[2]->NumberValue(); // we fetch sdoSubIndex
+    int type=args[3]->NumberValue(); // we fetch size
+    int value=args[4]->NumberValue(); // we fetch the value
+
+    SSlave &slave=slaves[slaveIndex];
+    ec_slave_config_t *slaveConfig=slave.slave_config;
+    if (!slaveConfig){
+        setError(args,(char *)"Slave not configured");
+        return;
+    }
+
+    printf("Configuring sdo. Index: 0x%X, subIndex: 0x%X, value:%d\n",sdoIndex,sdoSubIndex,value);
+    switch(type){
+        case 0: //uint8
+        case 1: //int8
+            ecrt_slave_config_sdo8(slaveConfig,sdoIndex,sdoSubIndex,value);
+            break;
+        case 2: //uint16
+        case 3: //int16
+            ecrt_slave_config_sdo8(slaveConfig,sdoIndex,sdoSubIndex,value);
+            break;
+        case 4: //uint32
+        case 5: //int32
+            ecrt_slave_config_sdo8(slaveConfig,sdoIndex,sdoSubIndex,value);
+            break;
+
+    }
+}
+
 void init(Handle<Object> exports) {
   NODE_SET_METHOD(exports,"addSlave",addSlave);
   NODE_SET_METHOD(exports,"printSlave",printSlave);
@@ -667,6 +736,9 @@ void init(Handle<Object> exports) {
   NODE_SET_METHOD(exports,"activate",activate);
   NODE_SET_METHOD(exports,"readPin",readPin);
   NODE_SET_METHOD(exports,"writePin",writePin);
+  NODE_SET_METHOD(exports,"configSdo",configSdo);
+  NODE_SET_METHOD(exports,"getMasterState",getMasterState);
+
 }
 
 NODE_MODULE(ethercat, init)

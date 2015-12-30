@@ -1,0 +1,56 @@
+{
+  "id": {
+    "vendor": "0x17f",
+    "product": "0x14"
+  },
+  "syncs": [
+    {
+      "syncManager": 2,
+      "direction": "output",
+      "pdos": [
+        {
+          "index": "0x1601",
+          "entries": [
+            {
+              "index": "0x6040",
+              "subindex": 0,
+              "name": "controlWord",
+              "type": "uint16"
+            },
+            {
+              "index": "0x607a",
+              "subindex": 0,
+              "name": "targetPosition",
+              "type": "int32"
+            }
+          ]
+        }
+      ],
+      "watchdog": "disable"
+    },
+    {
+      "syncManager": 3,
+      "direction": "input",
+      "pdos": [
+        {
+          "index": "0x1a01",
+          "entries": [
+            {
+              "index": "0x6041",
+              "subindex": 0,
+              "name": "statusWord",
+              "type": "uint16"
+            },
+            {
+              "index": "0x6064",
+              "subindex": 0,
+              "name": "actualPosition",
+              "type": "int32"
+            }
+          ]
+        }
+      ],
+      "watchdog": "disable"
+    }
+  ]
+}
