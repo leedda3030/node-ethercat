@@ -534,15 +534,18 @@ void * cycle(void *arg){
         ecrt_master_send(master);
         ecrt_master_receive(master);
         ecrt_master_state(master, &master_state);
-        if (!use_sem){
+
+        ecrt_domain_process(domain);
+        ecrt_domain_queue(domain);
+
+//        if (!use_sem){
             clock_gettime(CLOCK_REALTIME, &cur_time);
             wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec) % LOOP_PERIOD_NS);
             nanosleep(&wait_time, NULL);
-        }else{
-            sem_wait(sem); // We wait for the semaphore before continuing. Please use with care
-        }
-        ecrt_domain_process(domain);
-        ecrt_domain_queue(domain);
+//        }else{
+//            printf("Waiting for semaphore\n");
+//            sem_wait(sem); // We wait for the semaphore before continuing. Please use with care
+//        }
     }
     printf("Exiting from cycle RT thread\n");
     return NULL;

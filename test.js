@@ -99,6 +99,7 @@ addSlaves(0,function(res){
         }
         console.log("start success");
         ethercat.activate({useSemaphore:false},function(res){
+            return;
             ethercat.writePin("rta0.controlWord",6);
             ethercat.writePin("rta1.controlWord",6);
             setTimeout(function(){
