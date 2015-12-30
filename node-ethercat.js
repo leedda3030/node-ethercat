@@ -28,6 +28,7 @@ var numPins=0; // How many pins have been added? We have one ec_pdo_entry_reg_t 
 var initialised=false; // Can only be started once.
 
 function start(options,callback){
+    // No options to be used at the moment.
     if (initialised){
         callback({
             result:"error",
@@ -151,7 +152,8 @@ function start(options,callback){
 }
 
 function activate(options,callback){
-    var res=ethercat.activate(options);
+    var semaphoreName=options.semaphoreName;
+    var res=ethercat.activate({semaphoreName:semaphoreName});
     callback(res);
 }
 
