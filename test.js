@@ -98,7 +98,7 @@ addSlaves(0,function(res){
             return;
         }
         console.log("start success");
-        ethercat.activate({semaphoreName3:"ethercatSemaphore"},function(res){
+        ethercat.activate({useSemaphore:false},function(res){
             ethercat.writePin("rta0.controlWord",6);
             ethercat.writePin("rta1.controlWord",6);
             setTimeout(function(){
@@ -138,8 +138,6 @@ function dummy(){
     setTimeout(dummy,1000);
     var controlWord=ethercat.readPin('rta1.statusWord');
     var pos=ethercat.readPin('rta1.actualPosition');
-    var masterState=ethercat.getMasterState();
-    console.log("masterStatue",masterState);
     console.log("rta1.controlWord: "+controlWord+" rta1.actualPosition: "+pos);
 };
 dummy();

@@ -152,8 +152,10 @@ function start(options,callback){
 }
 
 function activate(options,callback){
-    var semaphoreName=options.semaphoreName;
-    var res=ethercat.activate({semaphoreName:semaphoreName});
+    var useSemaphore=options.useSemaphore?true:false; // truthy check
+    var res=ethercat.activate({useSemaphore:useSemaphore});
+    var domainSize=ethercat.getDomainSize();
+    console.log("domainSize: "+domainSize);
     callback(res);
 }
 
@@ -237,13 +239,17 @@ function addSlave(options,callback){
         callback({result:"error",error:"Please provide slave data"});
         return;
     }
+    if (initialised){
+        callback({result:"error",error:"Already initialised. You must reboot the process"});
+        return;
+    }
     var id=options.id;
 
     if (!id){
         callback({result:"error",error:"Please provide slave id"});
         return;
     }
-    if (getSlave[id]){
+    if (slaves[id]){
         callback({result:"error",error:"Duplicate slave. Please provide unique slave names"});
         return;
     }
@@ -343,8 +349,10 @@ function addSlave(options,callback){
                 }
                 var fullPinName=id+"."+entryName;
                 var pinIndex=addPin({slaveId:id,name:fullPinName,size:bitLength,type:entryType,index:entry.index,subindex:entry.subindex});
+
                 if (pinIndex==-1){
                     callback({result:"error",error:"Cannot add pin "+fullPinName+". Probably duplicated "})
+                    return;
                 }
                 entry.bitLength=bitLength;
 
@@ -446,14 +454,14 @@ function getMasterState(){
 }
 
 module.exports={
-    start:start,
-    activate:activate,
-    addSlave:addSlave,
-    printSlave:printSlave,
-    getPins:getPins,
-    readPin:readPin,
-    writePin:writePin,
-    configSdo:configSdo,
-    getMasterState:getMasterState
+    start:start, // async {},callback
+    activate:activate, // async {useSemaphore:true|false},callback
+    addSlave:addSlave, // async {},callback
+    printSlave:printSlave, // debug only
+    getPins:getPins, // () -> {}   --- returns pins
+    readPin:readPin, //  (name)->value --- reads value
+    writePin:writePin, // (name,value) --> undefind  --- writes value
+    configSdo:configSdo, // async {slaveId:string,index:hex string|number,subindes:hex string|number,type:"uint8"|"int8"...,value:number},callback
+    getMasterState:getMasterState // () -> {} -- Returns master state
 }
 

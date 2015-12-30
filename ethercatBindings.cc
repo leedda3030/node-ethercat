@@ -20,8 +20,10 @@ Please take into account that some structures (like pin names and offsets) are k
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/syscall.h>
 #include <semaphore.h>
+#include <sys/shm.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <sched.h>
@@ -49,6 +51,9 @@ using namespace std;
 
 #define LOOP_PERIOD_NS 1000000
 
+#define SEMAPHORE_NAME "/nodeEthercatSemaphore"
+#define SHARED_MEMORY_NAME "/nodeEthercatSharedMemory"
+
 
 /****************************************************************************/
 
@@ -57,7 +62,8 @@ static ec_master_t *master = NULL;
 static ec_master_state_t master_state ;
 
 static ec_domain_t *domain = NULL;
-static ec_domain_state_t domain_state ;
+//static ec_domain_state_t domain_state ;
+static size_t domain_size=0;
 
 class SSlave{
  public:
@@ -458,8 +464,10 @@ double accumDif=0;
 double avgDif=0;
 unsigned long curTime=0;
 unsigned long curSecs=0;
-string semName; // Name of the semaphore. If NULL, we will use sleep.
 sem_t * sem=NULL; // semaphore
+unsigned char *shared_memory;
+int shm_fd;
+bool use_sem=false;
 
 void * cycle(void *arg){
     struct sched_param param;
@@ -507,24 +515,36 @@ void * cycle(void *arg){
     nanosleep(&wait_time,NULL);
     // Let's create semaphore
     printf("Entering loop\n");
+    if (use_sem){
+        printf("using semaphore. Creating semaphore and shared memory\n");
+        sem=sem_open(SEMAPHORE_NAME,O_CREAT,0644,0);
+        shm_fd=shm_open(SHARED_MEMORY_NAME,O_CREAT|O_RDWR,0666);
+        ftruncate(shm_fd,domain_size);
+        shared_memory=(unsigned char *)mmap(0,domain_size,PROT_READ|PROT_WRITE,MAP_SHARED,shm_fd,0);
+        if (shared_memory==MAP_FAILED){
+          printf("Could not allocate shared memory\n");
+          return NULL;
+        }
+
+    }else{
+       sem=NULL;
+    }
     while (cycle_active) {
         _times++;
-
         ecrt_master_send(master);
         ecrt_master_receive(master);
         ecrt_master_state(master, &master_state);
-
-        if (!sem){
+        if (!use_sem){
             clock_gettime(CLOCK_REALTIME, &cur_time);
             wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec) % LOOP_PERIOD_NS);
             nanosleep(&wait_time, NULL);
         }else{
             sem_wait(sem); // We wait for the semaphore before continuing. Please use with care
         }
-
         ecrt_domain_process(domain);
         ecrt_domain_queue(domain);
     }
+    printf("Exiting from cycle RT thread\n");
     return NULL;
 }
 
@@ -541,28 +561,26 @@ void activate(const FunctionCallbackInfo<Value>&args){
     // Let's get the semaphore name
     Local<Value>options=args[0];
     if (options->IsObject()){
-        Local<Value>semaphoreName=options->ToObject()->Get(String::NewFromUtf8(isolate,"semaphoreName"));
-        if (semaphoreName->IsString()){
-            String::Utf8Value semaphoreNameUtf8(semaphoreName->ToString());
-            semName=*semaphoreNameUtf8;
-            if (semName.length()){
-                sem=sem_open(semName.c_str(),0);
-                if (!sem){
-                    setError(args,String::NewFromUtf8(isolate,"Semaphore not found"));
-                    return;
-                }
-            }
+        Local<Value>useSemaphore=options->ToObject()->Get(String::NewFromUtf8(isolate,"useSemaphore"));
+        if (useSemaphore->IsTrue()){
+            use_sem=true;
+        }else{
+            use_sem=false;
         }
     }
     pthread_create(&cycleId,NULL,&cycle,NULL);
+    domain_size=0;
     if (ecrt_master_activate(master)){
+        cycle_active=false;
         setError(args,(char *)"Could not activate master");
         return;
     }
     if (!(domain_pd = ecrt_domain_data(domain))) {
+        cycle_active=false;
         setError(args,(char*)"Could not retrieve domain data");
         return;
     }
+    domain_size=ecrt_domain_size(domain);
     printf("Master active\n");
     Local<Object> res=Object::New(isolate);
     res->Set(String::NewFromUtf8(isolate,"result"),String::NewFromUtf8(isolate,"ok"));
@@ -653,7 +671,16 @@ void getMasterState(const FunctionCallbackInfo<Value>&args){
     args.GetReturnValue().Set(obj);
 }
 
+void getDomainSize(const FunctionCallbackInfo<Value>&args){
+    Isolate *isolate=Isolate::GetCurrent();
+    HandleScope scope(isolate);
+    if (!domain){
+        args.GetReturnValue().Set(Number::New(isolate,0));
+        return;
+    }
+    args.GetReturnValue().Set(Number::New(isolate,domain_size));
 
+}
 // DO NOT CALL FUNCTIONS LIKE THIS DIRECTLY, THEY DO NOT MAKE ANY
 // TYPE CHECKING OR PARAMETERS CHECKING. ALL TYPE CHECKING MUST BE
 // PERFORMED IN JAVASCRIPT BY THE CALLER
@@ -699,7 +726,7 @@ void init(Handle<Object> exports) {
   NODE_SET_METHOD(exports,"writePin",writePin);
   NODE_SET_METHOD(exports,"configSdo",configSdo);
   NODE_SET_METHOD(exports,"getMasterState",getMasterState);
-
+  NODE_SET_METHOD(exports,"getDomainSize",getDomainSize);
 }
 
 NODE_MODULE(ethercat, init)
