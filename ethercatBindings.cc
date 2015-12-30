@@ -78,45 +78,6 @@ vector <SSlave> slaves;
 static bool initialised=false;
 static bool cycle_active = false; // Indicates if the cyclic task is active
 
-
-/****************************************************************************/
-
-
-
-void check_domain_state(void)
-{
-    ec_domain_state_t ds;
-
-    ecrt_domain_state(domain, &ds);
-
-    #ifdef DEBUG
-        if (ds.working_counter != domain_state.working_counter)
-            printf("Domain1: WC %u.\n", ds.working_counter);
-        if (ds.wc_state != domain_state.wc_state)
-            printf("Domain1: State %u.\n", ds.wc_state);
-    #endif
-    domain_state = ds;
-}
-
-/*****************************************************************************/
-
-void check_master_state(void)
-{
-    ec_master_state_t ms;
-
-    ecrt_master_state(master, &ms);
-
-    #ifdef DEBUG
-        if (ms.slaves_responding != master_state.slaves_responding)
-            printf("%u slave(s).\n", ms.slaves_responding);
-        if (ms.al_states != master_state.al_states)
-            printf("AL states: 0x%02X.\n", ms.al_states);
-        if (ms.link_up != master_state.link_up)
-            printf("Link is %s.\n", ms.link_up ? "up" : "down");
-    #endif
-    master_state = ms;
-}
-
 /*****************************************************************************/
 
 
