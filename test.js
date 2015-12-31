@@ -85,6 +85,7 @@ function addSlaves(index,callback){
 
 waitForTorqueTime=1000;
 
+var ready=0;
 addSlaves(0,function(res){
     if (res.result=="error"){
         console.log(res);
@@ -99,7 +100,6 @@ addSlaves(0,function(res){
         }
         console.log("start success");
         ethercat.activate({useSemaphore:false},function(res){
-            return;
             ethercat.writePin("rta0.controlWord",6);
             ethercat.writePin("rta1.controlWord",6);
             setTimeout(function(){
@@ -122,6 +122,7 @@ addSlaves(0,function(res){
                                     console.log("Activating system again");
                                     started=true;
                                     console.log("EthercatRT started");
+                                    ready=true;
                                     return;
 
                                 })
@@ -135,10 +136,23 @@ addSlaves(0,function(res){
 
     });
 })
+var posAxis=0;
 function dummy(){
-    setTimeout(dummy,1000);
-    var controlWord=ethercat.readPin('rta1.statusWord');
-    var pos=ethercat.readPin('rta1.actualPosition');
-    console.log("rta1.controlWord: "+controlWord+" rta1.actualPosition: "+pos);
+    if (ready){
+        if (!posAxis){
+            posAxis=0;
+        }
+        posAxis+=10;
+        ethercat.writePin('rta0.targetPosition',posAxis);
+        if (!(posAxis%100)){
+            console.log("position: "+posAxis);
+        }
+        setTimeout(dummy,10);
+    }else{
+        setTimeout(dummy,1000);
+        var controlWord=ethercat.readPin('rta1.statusWord');
+        var pos=ethercat.readPin('rta1.actualPosition');
+        console.log("rta1.controlWord: "+controlWord+" rta1.actualPosition: "+pos);
+    }
 };
 dummy();
