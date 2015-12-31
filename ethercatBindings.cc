@@ -154,6 +154,7 @@ void start(const FunctionCallbackInfo<Value>& args) {
             setError(args,(char *)"Cannot get slave_config");
             return;
         }
+        //printf("Going to configure slave pdos\n");
         if (ecrt_slave_config_pdos(slave.slave_config,slave.numSyncs,slave.syncs)){
             setError(args,(char *)"Cannot configure slave pdos for slave");
             return;
@@ -163,6 +164,7 @@ void start(const FunctionCallbackInfo<Value>& args) {
     // Let's create the process domain array
     domain_regs=(ec_pdo_entry_reg_t *)malloc(numEntries*sizeof(ec_pdo_entry_reg_t));
     unsigned int *offsets=(unsigned int *)malloc(numEntries*sizeof(unsigned int));
+    //printf("Num pdo entries: %d\n",numEntries);
     for (int i=0; i<numEntries; i++){
         Local<Object>entry=domainEntries->Get(i)->ToObject();
         ec_pdo_entry_reg_t domainReg;
@@ -172,6 +174,9 @@ void start(const FunctionCallbackInfo<Value>& args) {
         domainReg.product_code=entry->Get(String::NewFromUtf8(isolate,"product_code"))->NumberValue();
         domainReg.index=entry->Get(String::NewFromUtf8(isolate,"index"))->NumberValue();
         domainReg.subindex=entry->Get(String::NewFromUtf8(isolate,"subindex"))->NumberValue();
+        //printf("PDO entry: alias:%d, position:%d, vendor_id:0x%X, product_code: 0x%X, index:0x%X, subindex:0x%X\n",
+        //    domainReg.alias,domainReg.position,domainReg.vendor_id,domainReg.product_code,domainReg.index,domainReg.subindex
+        //);
         offsets[i]=-1;
         domainReg.offset=&(offsets[i]);
         domain_regs[i]=domainReg;
@@ -474,7 +479,7 @@ void * cycle(void *arg){
     /* Declare ourself as a real time task */
     pid_t tid;
     tid = syscall(SYS_gettid);
-    printf("tid: %d\n",tid);
+    //printf("tid: %d\n",tid);
     param.sched_priority = MY_PRIORITY;
     if(sched_setscheduler(tid, SCHED_FIFO, &param) == -1) {
         perror("sched_setscheduler failed");
@@ -538,14 +543,14 @@ void * cycle(void *arg){
         ecrt_domain_process(domain);
         ecrt_domain_queue(domain);
 
-//        if (!use_sem){
+        if (!use_sem){
             clock_gettime(CLOCK_REALTIME, &cur_time);
             wait_time.tv_nsec = LOOP_PERIOD_NS - ((cur_time.tv_nsec) % LOOP_PERIOD_NS);
             nanosleep(&wait_time, NULL);
-//        }else{
-//            printf("Waiting for semaphore\n");
-//            sem_wait(sem); // We wait for the semaphore before continuing. Please use with care
-//        }
+        }else{
+            printf("Waiting for semaphore\n");
+            sem_wait(sem); // We wait for the semaphore before continuing. Please use with care
+        }
     }
     printf("Exiting from cycle RT thread\n");
     return NULL;
@@ -702,19 +707,30 @@ void configSdo(const FunctionCallbackInfo<Value>&args){
         return;
     }
 
-    printf("Configuring sdo. Index: 0x%X, subIndex: 0x%X, value:%d\n",sdoIndex,sdoSubIndex,value);
     switch(type){
         case 0: //uint8
         case 1: //int8
-            ecrt_slave_config_sdo8(slaveConfig,sdoIndex,sdoSubIndex,value);
+            printf("Configuring sdo8. Index: 0x%X, subIndex: 0x%X, value:%d\n",sdoIndex,sdoSubIndex,value);
+            if (ecrt_slave_config_sdo8(slaveConfig,sdoIndex,sdoSubIndex,value)){
+                setError(args,(char *)"Error on sdo configuration");
+                return;
+            }
             break;
         case 2: //uint16
         case 3: //int16
-            ecrt_slave_config_sdo8(slaveConfig,sdoIndex,sdoSubIndex,value);
+            printf("Configuring sdo16. Index: 0x%X, subIndex: 0x%X, value:%d\n",sdoIndex,sdoSubIndex,value);
+            if (ecrt_slave_config_sdo16(slaveConfig,sdoIndex,sdoSubIndex,value)){
+                setError(args,(char *)"Error on sdo configuration");
+                return;
+            }
             break;
         case 4: //uint32
         case 5: //int32
-            ecrt_slave_config_sdo8(slaveConfig,sdoIndex,sdoSubIndex,value);
+            printf("Configuring sdo32. Index: 0x%X, subIndex: 0x%X, value:%d\n",sdoIndex,sdoSubIndex,value);
+            if (ecrt_slave_config_sdo32(slaveConfig,sdoIndex,sdoSubIndex,value)){
+                setError(args,(char *)"Error on sdo configuration");
+                return;
+            }
             break;
 
     }

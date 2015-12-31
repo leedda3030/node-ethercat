@@ -53,6 +53,7 @@ function start(options,callback){
     // Let's create the domainReg structure in Javascript so that it is a piece of cake
     // to do what we have to do in C++
     var domainEntries=[];
+    //console.log("pinList: ",pinList);
     for (var i=0; i<pinList.length; i++){
         var pin=pinList[i];
         var slave=getSlave(pin.slaveId);
@@ -75,6 +76,7 @@ function start(options,callback){
         });
     }
     options.domainEntries=domainEntries;
+    //console.log("domainEntries: "+domainEntries);
     var res=ethercat.start(options);
     if (res.result=="error"){
         callback(res);
@@ -155,7 +157,7 @@ function activate(options,callback){
     var useSemaphore=options.useSemaphore?true:false; // truthy check
     var res=ethercat.activate({useSemaphore:useSemaphore});
     var domainSize=ethercat.getDomainSize();
-    console.log("domainSize: "+domainSize);
+    //console.log("domainSize: "+domainSize);
     callback(res);
 }
 
