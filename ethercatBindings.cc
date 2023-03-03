@@ -16,7 +16,7 @@ Please take into account that some structures (like pin names and offsets) are k
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
+// #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <unistd.h>
